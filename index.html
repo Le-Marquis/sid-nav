@@ -94,7 +94,7 @@
     white-space: pre-line;
     text-align: center;
   }
-  #spotifyStatus, #stepsLabel { font-size: 0.8em; color: #999; margin-top: 8px; }
+  #stepsLabel { font-size: 0.8em; color: #999; margin-top: 8px; }
   #steps {
     margin-top: 8px;
     font-size: 0.8em;
@@ -111,9 +111,10 @@
   Itinéraire indépendant (pas de lecture de Waze/Google Maps, impossible sur
   iOS) — garde Waze ouvert pour l'affichage/la voix. Radars fixes issus
   d'OpenStreetMap (données communautaires). Pas d'accidents/trafic temps réel
-  : aucune source gratuite légale sans API payante. Musique : connecte
-  Spotify pour une lecture sans coupure, sinon repli en vol de focus ponctuel
-  (micro-coupure à chaque alerte).
+  : aucune source gratuite légale sans API payante. Musique : Spotify/Apple
+  Music jouent normalement à côté ; la page vole le focus audio ~3s à chaque
+  alerte pour afficher le texte, puis le relâche (micro-coupure à chaque
+  alerte, inévitable sans app native).
 </p>
 
 <div class="card">
@@ -129,7 +130,7 @@
     <input type="checkbox" id="settingRadar">
     <div>
       <label for="settingRadar">Alertes radars</label>
-      <div class="hint">Affiche "ZONE CONTROLE" à l'approche d'un radar fixe (OpenStreetMap).</div>
+      <div class="hint">Affiche "RADAR" + distance à l'approche d'un radar fixe (OpenStreetMap).</div>
     </div>
   </div>
   <div class="toggle-row">
@@ -139,31 +140,12 @@
       <div class="hint">Joue un bip à chaque alerte radar.</div>
     </div>
   </div>
-  <div class="toggle-row">
-    <input type="checkbox" id="settingSpotify">
-    <div>
-      <label for="settingSpotify">Musique sans coupure (Spotify)</label>
-      <div class="hint">Route la lecture Spotify dans la page pour éviter les micro-coupures.</div>
-    </div>
-  </div>
 </div>
 
 <div class="card">
   <h2>Test</h2>
   <button id="testRadarBtn">Tester alerte radar</button>
   <div class="hint">Simule une détection radar (texte + bip) sans GPS ni vrai radar, pour vérifier l'affichage sur le SID.</div>
-</div>
-
-<div class="card" id="spotifyCard">
-  <h2>Spotify</h2>
-  <input type="text" id="spotifyClientId" placeholder="Spotify Client ID">
-  <button id="spotifyConnectBtn">Connexion Spotify</button>
-  <button id="spotifyPlayBtn" style="display:none;">Lancer la lecture</button>
-  <div id="spotifyTransportRow" style="display:none; margin-top:8px;">
-    <button id="spotifyPrevBtn">⏮ Précédent</button>
-    <button id="spotifyNextBtn">Suivant ⏭</button>
-  </div>
-  <div id="spotifyStatus">Non connecté</div>
 </div>
 
 <div class="card" id="destCard">
@@ -182,7 +164,6 @@
   <source src="silence.mp3" type="audio/mpeg">
 </audio>
 
-<script src="https://sdk.scdn.co/spotify-player.js"></script>
 <script>
 const audio = document.getElementById('silentAudio');
 const statusEl = document.getElementById('status');
@@ -193,25 +174,16 @@ const startBtn = document.getElementById('startBtn');
 const calcBtn = document.getElementById('calcBtn');
 const destInput = document.getElementById('destInput');
 const destCard = document.getElementById('destCard');
-const spotifyCard = document.getElementById('spotifyCard');
-const spotifyClientIdInput = document.getElementById('spotifyClientId');
-const spotifyConnectBtn = document.getElementById('spotifyConnectBtn');
-const spotifyPlayBtn = document.getElementById('spotifyPlayBtn');
-const spotifyTransportRow = document.getElementById('spotifyTransportRow');
-const spotifyPrevBtn = document.getElementById('spotifyPrevBtn');
-const spotifyNextBtn = document.getElementById('spotifyNextBtn');
-const spotifyStatusEl = document.getElementById('spotifyStatus');
 const testRadarBtn = document.getElementById('testRadarBtn');
 
 // ---- Réglages persistants (activer/désactiver les fonctions) ----
-const DEFAULT_SETTINGS = { nav: true, radar: true, beep: true, spotify: true };
+const DEFAULT_SETTINGS = { nav: true, radar: true, beep: true };
 const settings = Object.assign({}, DEFAULT_SETTINGS, JSON.parse(localStorage.getItem('sidNavSettings') || '{}'));
 
 const settingEls = {
   nav: document.getElementById('settingNav'),
   radar: document.getElementById('settingRadar'),
-  beep: document.getElementById('settingBeep'),
-  spotify: document.getElementById('settingSpotify')
+  beep: document.getElementById('settingBeep')
 };
 
 function applySettingsToUI() {
@@ -219,9 +191,6 @@ function applySettingsToUI() {
   destCard.classList.toggle('disabled', !settings.nav);
   destInput.disabled = !settings.nav;
   calcBtn.disabled = !settings.nav;
-  spotifyCard.classList.toggle('disabled', !settings.spotify);
-  spotifyClientIdInput.disabled = !settings.spotify;
-  spotifyConnectBtn.disabled = !settings.spotify;
 }
 
 Object.keys(settingEls).forEach(key => {
@@ -260,291 +229,28 @@ function updateMetadata(line1, line2) {
   preview.textContent = l1 + '\n' + l2;
 }
 
-// ---- Spotify Web Playback SDK (PKCE, sans secret côté client) ----
-// La page devient elle-même le lecteur (device Spotify Connect) : la
-// musique joue en continu depuis cet onglet, donc plus besoin de voler le
-// focus audio pour afficher une alerte, juste de changer temporairement le
-// texte affiché puis de le restaurer.
-const SPOTIFY_SCOPES = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state';
-const SPOTIFY_REDIRECT_URI = window.location.origin + window.location.pathname;
-
-let spotifyAccessToken = null;
-let spotifyRefreshToken = null;
-let spotifyTokenExpiresAt = 0;
-let spotifyReady = false;
-let spotifyDeviceId = null;
-let currentTrackMeta = { title: 'Spotify', artist: '' };
-
-function base64url(bytes) {
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function generateCodeVerifier() {
-  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
-  const values = crypto.getRandomValues(new Uint8Array(64));
-  return Array.from(values, v => possible[v % possible.length]).join('');
-}
-
-async function codeChallengeFromVerifier(verifier) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-  return base64url(new Uint8Array(digest));
-}
-
-spotifyClientIdInput.value = localStorage.getItem('spotifyClientId') || '';
-
-spotifyPrevBtn.addEventListener('click', () => {
-  if (spotifyPlayer) spotifyPlayer.previousTrack();
-});
-
-spotifyNextBtn.addEventListener('click', () => {
-  if (spotifyPlayer) spotifyPlayer.nextTrack();
-});
-
-// Commandes physiques (volant / BT changer) : uniquement pour la musique,
-// jamais pour la navigation - le SID lui-même n'a pas de bouton next/prev
-// pour les instructions de nav, ça n'a de sens que pour changer de morceau.
-if ('mediaSession' in navigator) {
-  navigator.mediaSession.setActionHandler('previoustrack', () => {
-    if (spotifyPlayer) spotifyPlayer.previousTrack();
-  });
-  navigator.mediaSession.setActionHandler('nexttrack', () => {
-    if (spotifyPlayer) spotifyPlayer.nextTrack();
-  });
-}
-
-spotifyPlayBtn.addEventListener('click', async () => {
-  try {
-    // Déblocage audio iOS directement ici : ce clic suffit à lui seul,
-    // pas besoin de passer par le bouton "Démarrer" (réservé à l'itinéraire).
-    await audio.play();
-    audio.pause();
-    await spotifyPlayer.resume();
-    spotifyStatusEl.textContent = 'Connecté - musique en cours';
-    spotifyPlayBtn.style.display = 'none';
-  } catch (err) {
-    spotifyStatusEl.textContent = 'Erreur démarrage lecture: ' + err.message;
-  }
-});
-
-spotifyConnectBtn.addEventListener('click', async () => {
-  const clientId = spotifyClientIdInput.value.trim();
-  if (!clientId) { spotifyStatusEl.textContent = 'Entre ton Client ID Spotify d\'abord'; return; }
-  localStorage.setItem('spotifyClientId', clientId);
-
-  const verifier = generateCodeVerifier();
-  sessionStorage.setItem('spotify_verifier', verifier);
-  const challenge = await codeChallengeFromVerifier(verifier);
-
-  const params = new URLSearchParams({
-    client_id: clientId,
-    response_type: 'code',
-    redirect_uri: SPOTIFY_REDIRECT_URI,
-    code_challenge_method: 'S256',
-    code_challenge: challenge,
-    scope: SPOTIFY_SCOPES
-  });
-  window.location.href = 'https://accounts.spotify.com/authorize?' + params.toString();
-});
-
-async function exchangeCodeForToken(code) {
-  const clientId = localStorage.getItem('spotifyClientId');
-  const verifier = sessionStorage.getItem('spotify_verifier');
-  const res = await fetch('https://accounts.spotify.com/api/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: SPOTIFY_REDIRECT_URI,
-      client_id: clientId,
-      code_verifier: verifier
-    })
-  });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error_description || data.error);
-  applyTokenResponse(data);
-}
-
-async function refreshSpotifyToken() {
-  const clientId = localStorage.getItem('spotifyClientId');
-  const res = await fetch('https://accounts.spotify.com/api/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: spotifyRefreshToken,
-      client_id: clientId
-    })
-  });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error_description || data.error);
-  applyTokenResponse(data);
-}
-
-function applyTokenResponse(data) {
-  spotifyAccessToken = data.access_token;
-  if (data.refresh_token) spotifyRefreshToken = data.refresh_token;
-  spotifyTokenExpiresAt = Date.now() + data.expires_in * 1000;
-  sessionStorage.setItem('spotify_refresh_token', spotifyRefreshToken || '');
-}
-
-async function ensureFreshToken() {
-  if (Date.now() > spotifyTokenExpiresAt - 60000) {
-    await refreshSpotifyToken();
-  }
-  return spotifyAccessToken;
-}
-
-// Gère le retour de redirection OAuth (?code=...), ou reprend une session
-// existante via le refresh token stocké, au chargement de la page.
-(async () => {
-  if (!settings.spotify) return;
-
-  const url = new URL(window.location.href);
-  const code = url.searchParams.get('code');
-  if (code) {
-    window.history.replaceState({}, '', SPOTIFY_REDIRECT_URI);
-    try {
-      spotifyStatusEl.textContent = 'Connexion en cours...';
-      await exchangeCodeForToken(code);
-      initSpotifyPlayer();
-    } catch (err) {
-      spotifyStatusEl.textContent = 'Erreur connexion: ' + err.message;
-    }
-    return;
-  }
-
-  const savedRefreshToken = sessionStorage.getItem('spotify_refresh_token');
-  if (savedRefreshToken) {
-    spotifyRefreshToken = savedRefreshToken;
-    try {
-      spotifyStatusEl.textContent = 'Reconnexion...';
-      await refreshSpotifyToken();
-      initSpotifyPlayer();
-    } catch (err) {
-      spotifyStatusEl.textContent = 'Session expirée, reconnecte-toi';
-      sessionStorage.removeItem('spotify_refresh_token');
-    }
-  }
-})();
-
-// Le script du SDK appelle window.onSpotifyWebPlaybackSDKReady dès qu'il a
-// fini de charger, qu'on soit connecté ou non : il faut la définir tout de
-// suite, et différer la création du player jusqu'à ce qu'on ait un token.
-let spotifySDKReady = false;
-let spotifyInitPending = false;
-
-window.onSpotifyWebPlaybackSDKReady = () => {
-  spotifySDKReady = true;
-  if (spotifyInitPending) createSpotifyPlayer();
-};
-
-function initSpotifyPlayer() {
-  if (spotifySDKReady) createSpotifyPlayer();
-  else spotifyInitPending = true;
-}
-
-let spotifyPlayer = null;
-
-function createSpotifyPlayer() {
-  const player = new Spotify.Player({
-    name: 'SID Nav Player',
-    getOAuthToken: async cb => cb(await ensureFreshToken()),
-    volume: 0.8
-  });
-  spotifyPlayer = player;
-
-  // iOS exige une vraie interaction utilisateur pour démarrer le son : le
-  // transfert automatique ci-dessous met la lecture en état "playing" côté
-  // Spotify, mais aucun son ne sortira tant que l'utilisateur n'a pas
-  // cliqué sur "Lancer la lecture" (géré plus bas par spotifyPlayBtn).
-  player.addListener('ready', async ({ device_id }) => {
-    spotifyDeviceId = device_id;
-    spotifyReady = true;
-    spotifyStatusEl.textContent = 'Connecté - transfert de la lecture...';
-    try {
-      await fetch('https://api.spotify.com/v1/me/player', {
-        method: 'PUT',
-        headers: {
-          'Authorization': 'Bearer ' + (await ensureFreshToken()),
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ device_ids: [device_id], play: true })
-      });
-      spotifyStatusEl.textContent = 'Connecté - clique "Lancer la lecture" pour démarrer le son';
-      spotifyPlayBtn.style.display = 'inline-block';
-      spotifyTransportRow.style.display = 'block';
-    } catch (err) {
-      spotifyStatusEl.textContent = 'Connecté mais transfert échoué: ' + err.message;
-    }
-  });
-
-  player.addListener('not_ready', () => {
-    spotifyReady = false;
-  });
-
-  player.addListener('initialization_error', ({ message }) => {
-    spotifyStatusEl.textContent = 'Erreur init SDK: ' + message;
-  });
-  player.addListener('authentication_error', ({ message }) => {
-    spotifyStatusEl.textContent = 'Erreur auth: ' + message;
-  });
-  player.addListener('account_error', ({ message }) => {
-    spotifyStatusEl.textContent = 'Erreur compte (Premium requis): ' + message;
-  });
-  player.addListener('playback_error', ({ message }) => {
-    spotifyStatusEl.textContent = 'Erreur lecture: ' + message;
-  });
-
-  player.addListener('player_state_changed', state => {
-    if (!state || !state.track_window || !state.track_window.current_track) return;
-    const track = state.track_window.current_track;
-    currentTrackMeta = {
-      title: track.name,
-      artist: track.artists.map(a => a.name).join(', ')
-    };
-    if (!alertOverrideActive) {
-      updateMetadata(currentTrackMeta.title, currentTrackMeta.artist);
-    }
-  });
-
-  player.connect();
-}
-
-// ---- Diffusion des alertes ----
-// Ligne 1/2 : alerte affichée le temps de holdMs. On NE force plus le retour
-// aux métadonnées Spotify après coup : ça ramenait un texte de "track"
-// générique/placeholder (type "Spotify - Web Player") tant qu'aucun vrai
-// morceau n'était réellement chargé. L'affichage réel du morceau ne revient
-// que si Spotify pousse lui-même un vrai changement d'état (player_state_changed),
-// jamais de façon forcée depuis ici.
+// ---- Vol de focus audio ponctuel ----
+// Le SDK Spotify Web Playback joue l'audio via un iframe cross-origin
+// (sdk.scdn.co) : la Media Session API est spécifique à chaque document, donc
+// notre navigator.mediaSession.metadata n'a aucun effet sur ce que l'iframe
+// (et donc l'OS/AVRCP) affiche réellement. C'est un problème connu et non
+// résolu côté Spotify (github.com/spotify/web-playback-sdk/issues/105), pas
+// quelque chose de corrigeable ici. Retour à l'approche fiable : on ne prend
+// la main que le temps de pousser une alerte (play() sur notre propre
+// élément audio, qu'on contrôle entièrement), puis on la relâche.
 const ALERT_HOLD_MS = 3000;
 let releaseTimer = null;
-let alertOverrideActive = false;
 
 async function pushAlert(line1, line2, holdMs = ALERT_HOLD_MS) {
-  clearTimeout(releaseTimer);
-  alertOverrideActive = true;
   updateMetadata(line1, line2);
-  // Nudge le BT changer pour qu'il aille rechercher le texte, sans couper le son
-  navigator.mediaSession.playbackState = 'paused';
-  setTimeout(() => { navigator.mediaSession.playbackState = 'playing'; }, 100);
-
-  if (settings.spotify && spotifyReady) {
-    releaseTimer = setTimeout(() => {
-      alertOverrideActive = false;
-    }, holdMs);
-    return;
-  }
-
-  // Repli sans Spotify : vol de focus ponctuel (micro-coupure audible)
+  clearTimeout(releaseTimer);
   try {
     await audio.play();
+    navigator.mediaSession.playbackState = 'playing';
   } catch (err) {
     statusEl.textContent = 'Lecture bloquée: ' + err.message;
   }
   releaseTimer = setTimeout(() => {
-    alertOverrideActive = false;
     audio.pause();
   }, holdMs);
 }
@@ -776,9 +482,6 @@ function startNavLoop() {
       statusEl.textContent = 'Erreur GPS: ' + err.message;
     }, { enableHighAccuracy: true, maximumAge: 1000 });
   } else {
-    alertOverrideActive = true;
-    lastAlertKey = 'idle';
-    updateMetadata('RADARS ON', 'RADARS ON');
     watchId = navigator.geolocation.watchPosition(alertTick, err => {
       statusEl.textContent = 'Erreur GPS: ' + err.message;
     }, { enableHighAccuracy: true, maximumAge: 1000 });
@@ -852,15 +555,9 @@ async function alertTick(pos) {
   });
 
   if (closest === null) {
-    // Pas de radar détecté : affiche un statut fixe plutôt que de laisser
-    // passer les métadonnées brutes de Spotify (ex: état "Spotify - Web
-    // Player" avant qu'un vrai morceau soit chargé), qui n'apportent rien
-    // d'utile en mode radar seul.
-    if (lastAlertKey !== 'idle') {
-      lastAlertKey = 'idle';
-      alertOverrideActive = true;
-      updateMetadata('RADARS ON', 'RADARS ON');
-    }
+    // Pas de radar détecté : on ne touche pas au focus audio, Spotify/Apple
+    // Music restent affichés normalement sur le SID.
+    lastAlertKey = null;
     return;
   }
 
