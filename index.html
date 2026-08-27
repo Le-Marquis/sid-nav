@@ -246,10 +246,17 @@ async function pushAlert(line1, line2, holdMs = ALERT_HOLD_MS) {
   clearTimeout(releaseTimer);
   try {
     await audio.play();
-    navigator.mediaSession.playbackState = 'playing';
   } catch (err) {
     statusEl.textContent = 'Lecture bloquée: ' + err.message;
   }
+  // Nudge le BT changer : si l'audio est déjà en lecture (fréquent en mode
+  // navigation actif), un simple changement de métadonnées ne suffit pas
+  // toujours à le faire relire le texte - certains ne le font que sur une
+  // vraie transition d'état playback. D'où ce court aller-retour.
+  navigator.mediaSession.playbackState = 'paused';
+  setTimeout(() => {
+    navigator.mediaSession.playbackState = 'playing';
+  }, 100);
   releaseTimer = setTimeout(() => {
     audio.pause();
     // Sans ça, le SID reste bloqué sur le texte de l'alerte indéfiniment :
