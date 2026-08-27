@@ -159,6 +159,10 @@
   <input type="text" id="spotifyClientId" placeholder="Spotify Client ID">
   <button id="spotifyConnectBtn">Connexion Spotify</button>
   <button id="spotifyPlayBtn" style="display:none;">Lancer la lecture</button>
+  <div id="spotifyTransportRow" style="display:none; margin-top:8px;">
+    <button id="spotifyPrevBtn">⏮ Précédent</button>
+    <button id="spotifyNextBtn">Suivant ⏭</button>
+  </div>
   <div id="spotifyStatus">Non connecté</div>
 </div>
 
@@ -193,6 +197,9 @@ const spotifyCard = document.getElementById('spotifyCard');
 const spotifyClientIdInput = document.getElementById('spotifyClientId');
 const spotifyConnectBtn = document.getElementById('spotifyConnectBtn');
 const spotifyPlayBtn = document.getElementById('spotifyPlayBtn');
+const spotifyTransportRow = document.getElementById('spotifyTransportRow');
+const spotifyPrevBtn = document.getElementById('spotifyPrevBtn');
+const spotifyNextBtn = document.getElementById('spotifyNextBtn');
 const spotifyStatusEl = document.getElementById('spotifyStatus');
 const testRadarBtn = document.getElementById('testRadarBtn');
 
@@ -284,6 +291,26 @@ async function codeChallengeFromVerifier(verifier) {
 }
 
 spotifyClientIdInput.value = localStorage.getItem('spotifyClientId') || '';
+
+spotifyPrevBtn.addEventListener('click', () => {
+  if (spotifyPlayer) spotifyPlayer.previousTrack();
+});
+
+spotifyNextBtn.addEventListener('click', () => {
+  if (spotifyPlayer) spotifyPlayer.nextTrack();
+});
+
+// Commandes physiques (volant / BT changer) : uniquement pour la musique,
+// jamais pour la navigation - le SID lui-même n'a pas de bouton next/prev
+// pour les instructions de nav, ça n'a de sens que pour changer de morceau.
+if ('mediaSession' in navigator) {
+  navigator.mediaSession.setActionHandler('previoustrack', () => {
+    if (spotifyPlayer) spotifyPlayer.previousTrack();
+  });
+  navigator.mediaSession.setActionHandler('nexttrack', () => {
+    if (spotifyPlayer) spotifyPlayer.nextTrack();
+  });
+}
 
 spotifyPlayBtn.addEventListener('click', async () => {
   try {
@@ -446,6 +473,7 @@ function createSpotifyPlayer() {
       });
       spotifyStatusEl.textContent = 'Connecté - clique "Lancer la lecture" pour démarrer le son';
       spotifyPlayBtn.style.display = 'inline-block';
+      spotifyTransportRow.style.display = 'block';
     } catch (err) {
       spotifyStatusEl.textContent = 'Connecté mais transfert échoué: ' + err.message;
     }
@@ -484,8 +512,12 @@ function createSpotifyPlayer() {
 }
 
 // ---- Diffusion des alertes ----
-// Ligne 1/2 : alerte le temps de holdMs, puis restauration du morceau en
-// cours (Spotify connecté) ou vol de focus ponctuel en repli (silence.mp3).
+// Ligne 1/2 : alerte affichée le temps de holdMs. On NE force plus le retour
+// aux métadonnées Spotify après coup : ça ramenait un texte de "track"
+// générique/placeholder (type "Spotify - Web Player") tant qu'aucun vrai
+// morceau n'était réellement chargé. L'affichage réel du morceau ne revient
+// que si Spotify pousse lui-même un vrai changement d'état (player_state_changed),
+// jamais de façon forcée depuis ici.
 const ALERT_HOLD_MS = 3000;
 let releaseTimer = null;
 let alertOverrideActive = false;
@@ -501,7 +533,6 @@ async function pushAlert(line1, line2, holdMs = ALERT_HOLD_MS) {
   if (settings.spotify && spotifyReady) {
     releaseTimer = setTimeout(() => {
       alertOverrideActive = false;
-      updateMetadata(currentTrackMeta.title, currentTrackMeta.artist);
     }, holdMs);
     return;
   }
