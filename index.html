@@ -152,6 +152,7 @@
   <h2>Spotify</h2>
   <input type="text" id="spotifyClientId" placeholder="Spotify Client ID">
   <button id="spotifyConnectBtn">Connexion Spotify</button>
+  <button id="spotifyPlayBtn" style="display:none;">Lancer la lecture</button>
   <div id="spotifyStatus">Non connecté</div>
 </div>
 
@@ -185,6 +186,7 @@ const destCard = document.getElementById('destCard');
 const spotifyCard = document.getElementById('spotifyCard');
 const spotifyClientIdInput = document.getElementById('spotifyClientId');
 const spotifyConnectBtn = document.getElementById('spotifyConnectBtn');
+const spotifyPlayBtn = document.getElementById('spotifyPlayBtn');
 const spotifyStatusEl = document.getElementById('spotifyStatus');
 
 // ---- Réglages persistants (activer/désactiver les fonctions) ----
@@ -275,6 +277,16 @@ async function codeChallengeFromVerifier(verifier) {
 }
 
 spotifyClientIdInput.value = localStorage.getItem('spotifyClientId') || '';
+
+spotifyPlayBtn.addEventListener('click', async () => {
+  try {
+    await spotifyPlayer.resume();
+    spotifyStatusEl.textContent = 'Connecté - musique en cours';
+    spotifyPlayBtn.style.display = 'none';
+  } catch (err) {
+    spotifyStatusEl.textContent = 'Erreur démarrage lecture: ' + err.message;
+  }
+});
 
 spotifyConnectBtn.addEventListener('click', async () => {
   const clientId = spotifyClientIdInput.value.trim();
@@ -394,13 +406,20 @@ function initSpotifyPlayer() {
   else spotifyInitPending = true;
 }
 
+let spotifyPlayer = null;
+
 function createSpotifyPlayer() {
   const player = new Spotify.Player({
     name: 'SID Nav Player',
     getOAuthToken: async cb => cb(await ensureFreshToken()),
     volume: 0.8
   });
+  spotifyPlayer = player;
 
+  // iOS exige une vraie interaction utilisateur pour démarrer le son : le
+  // transfert automatique ci-dessous met la lecture en état "playing" côté
+  // Spotify, mais aucun son ne sortira tant que l'utilisateur n'a pas
+  // cliqué sur "Lancer la lecture" (géré plus bas par spotifyPlayBtn).
   player.addListener('ready', async ({ device_id }) => {
     spotifyDeviceId = device_id;
     spotifyReady = true;
@@ -414,7 +433,8 @@ function createSpotifyPlayer() {
         },
         body: JSON.stringify({ device_ids: [device_id], play: true })
       });
-      spotifyStatusEl.textContent = 'Connecté - musique routée vers la page';
+      spotifyStatusEl.textContent = 'Connecté - clique "Lancer la lecture" pour démarrer le son';
+      spotifyPlayBtn.style.display = 'inline-block';
     } catch (err) {
       spotifyStatusEl.textContent = 'Connecté mais transfert échoué: ' + err.message;
     }
@@ -422,6 +442,19 @@ function createSpotifyPlayer() {
 
   player.addListener('not_ready', () => {
     spotifyReady = false;
+  });
+
+  player.addListener('initialization_error', ({ message }) => {
+    spotifyStatusEl.textContent = 'Erreur init SDK: ' + message;
+  });
+  player.addListener('authentication_error', ({ message }) => {
+    spotifyStatusEl.textContent = 'Erreur auth: ' + message;
+  });
+  player.addListener('account_error', ({ message }) => {
+    spotifyStatusEl.textContent = 'Erreur compte (Premium requis): ' + message;
+  });
+  player.addListener('playback_error', ({ message }) => {
+    spotifyStatusEl.textContent = 'Erreur lecture: ' + message;
   });
 
   player.addListener('player_state_changed', state => {
