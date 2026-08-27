@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SID Nav Metadata</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, sans-serif;
+    background: #111;
+    color: #eee;
+    text-align: center;
+    padding: 24px 16px 60px;
+  }
+  h1 { font-size: 1.15em; margin-bottom: 4px; }
+  p.warn {
+    font-size: 0.78em;
+    color: #f5a623;
+    max-width: 420px;
+    margin: 8px auto 20px;
+    line-height: 1.4;
+  }
+  .card {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 10px;
+    padding: 16px;
+    margin: 14px auto;
+    max-width: 420px;
+    text-align: left;
+  }
+  .card h2 {
+    margin: 0 0 12px;
+    font-size: 0.9em;
+    color: #aaa;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .card.disabled { opacity: 0.45; }
+  .toggle-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 0;
+    border-top: 1px solid #262626;
+  }
+  .toggle-row:first-of-type { border-top: none; }
+  .toggle-row input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    accent-color: #2a6df5;
+  }
+  .toggle-row label { font-size: 0.92em; cursor: pointer; }
+  .toggle-row .hint { font-size: 0.75em; color: #888; margin-top: 2px; }
+  input[type="text"] {
+    width: 100%;
+    padding: 10px;
+    font-size: 1em;
+    border-radius: 6px;
+    border: 1px solid #444;
+    background: #000;
+    color: #eee;
+    margin-bottom: 8px;
+  }
+  button {
+    padding: 12px 20px;
+    font-size: 0.95em;
+    border-radius: 8px;
+    border: none;
+    background: #2a6df5;
+    color: white;
+    cursor: pointer;
+  }
+  button:disabled { background: #444; cursor: default; }
+  #status {
+    max-width: 420px;
+    margin: 14px auto 0;
+    font-size: 0.85em;
+    color: #999;
+  }
+  #startBtnWrap { text-align: center; margin-top: 18px; }
+  #preview {
+    margin: 20px auto 0;
+    max-width: 420px;
+    padding: 16px;
+    background: #000;
+    border: 1px solid #333;
+    border-radius: 8px;
+    font-family: monospace;
+    font-size: 1.15em;
+    white-space: pre-line;
+    text-align: center;
+  }
+  #spotifyStatus, #stepsLabel { font-size: 0.8em; color: #999; margin-top: 8px; }
+  #steps {
+    margin-top: 8px;
+    font-size: 0.8em;
+    color: #888;
+    max-height: 150px;
+    overflow-y: auto;
+  }
+</style>
+</head>
+<body>
+
+<h1>SID Nav via BT Changer</h1>
+<p class="warn">
+  Itinéraire indépendant (pas de lecture de Waze/Google Maps, impossible sur
+  iOS) — garde Waze ouvert pour l'affichage/la voix. Radars fixes issus
+  d'OpenStreetMap (données communautaires). Pas d'accidents/trafic temps réel
+  : aucune source gratuite légale sans API payante. Musique : connecte
+  Spotify pour une lecture sans coupure, sinon repli en vol de focus ponctuel
+  (micro-coupure à chaque alerte).
+</p>
+
+<div class="card">
+  <h2>Réglages</h2>
+  <div class="toggle-row">
+    <input type="checkbox" id="settingNav">
+    <div>
+      <label for="settingNav">Navigation (itinéraire)</label>
+      <div class="hint">Calcule un itinéraire et affiche distance + manoeuvre. Désactivé = toujours en mode alertes radars.</div>
+    </div>
+  </div>
+  <div class="toggle-row">
+    <input type="checkbox" id="settingRadar">
+    <div>
+      <label for="settingRadar">Alertes radars</label>
+      <div class="hint">Affiche "ZONE CONTROLE" à l'approche d'un radar fixe (OpenStreetMap).</div>
+    </div>
+  </div>
+  <div class="toggle-row">
+    <input type="checkbox" id="settingBeep">
+    <div>
+      <label for="settingBeep">Bip sonore</label>
+      <div class="hint">Joue un bip à chaque alerte radar.</div>
+    </div>
+  </div>
+  <div class="toggle-row">
+    <input type="checkbox" id="settingSpotify">
+    <div>
+      <label for="settingSpotify">Musique sans coupure (Spotify)</label>
+      <div class="hint">Route la lecture Spotify dans la page pour éviter les micro-coupures.</div>
+    </div>
+  </div>
+</div>
+
+<div class="card" id="spotifyCard">
+  <h2>Spotify</h2>
+  <input type="text" id="spotifyClientId" placeholder="Spotify Client ID">
+  <button id="spotifyConnectBtn">Connexion Spotify</button>
+  <div id="spotifyStatus">Non connecté</div>
+</div>
+
+<div class="card" id="destCard">
+  <h2>Destination</h2>
+  <input type="text" id="destInput" placeholder="Adresse de destination">
+  <button id="calcBtn">Calculer l'itinéraire</button>
+  <div id="stepsLabel"></div>
+  <div id="steps"></div>
+</div>
+
+<div id="preview">-- / --</div>
+<div id="startBtnWrap"><button id="startBtn">Démarrer</button></div>
+<div id="status">Règle tes options puis démarre.</div>
+
+<audio id="silentAudio" loop preload="auto">
+  <source src="silence.mp3" type="audio/mpeg">
+</audio>
+
+<script src="https://sdk.scdn.co/spotify-player.js"></script>
+<script>
+const audio = document.getElementById('silentAudio');
+const statusEl = document.getElementById('status');
+const preview = document.getElementById('preview');
+const stepsEl = document.getElementById('steps');
+const stepsLabelEl = document.getElementById('stepsLabel');
+const startBtn = document.getElementById('startBtn');
+const calcBtn = document.getElementById('calcBtn');
+const destInput = document.getElementById('destInput');
+const destCard = document.getElementById('destCard');
+const spotifyCard = document.getElementById('spotifyCard');
+const spotifyClientIdInput = document.getElementById('spotifyClientId');
+const spotifyConnectBtn = document.getElementById('spotifyConnectBtn');
+const spotifyStatusEl = document.getElementById('spotifyStatus');
+
+// ---- Réglages persistants (activer/désactiver les fonctions) ----
+const DEFAULT_SETTINGS = { nav: true, radar: true, beep: true, spotify: true };
+const settings = Object.assign({}, DEFAULT_SETTINGS, JSON.parse(localStorage.getItem('sidNavSettings') || '{}'));
+
+const settingEls = {
+  nav: document.getElementById('settingNav'),
+  radar: document.getElementById('settingRadar'),
+  beep: document.getElementById('settingBeep'),
+  spotify: document.getElementById('settingSpotify')
+};
+
+function applySettingsToUI() {
+  Object.keys(settingEls).forEach(key => { settingEls[key].checked = settings[key]; });
+  destCard.classList.toggle('disabled', !settings.nav);
+  destInput.disabled = !settings.nav;
+  calcBtn.disabled = !settings.nav;
+  spotifyCard.classList.toggle('disabled', !settings.spotify);
+  spotifyClientIdInput.disabled = !settings.spotify;
+  spotifyConnectBtn.disabled = !settings.spotify;
+}
+
+Object.keys(settingEls).forEach(key => {
+  settingEls[key].addEventListener('change', () => {
+    settings[key] = settingEls[key].checked;
+    localStorage.setItem('sidNavSettings', JSON.stringify(settings));
+    applySettingsToUI();
+  });
+});
+
+applySettingsToUI();
+
+// ---- Metadata -> AVRCP -> BT changer -> SID ----
+// Le SID n'affiche que 12 caractères par ligne et gère mal les accents :
+// on normalise systématiquement ici, quel que soit l'appelant.
+const SID_LINE_LENGTH = 12;
+
+function toSidText(str) {
+  return str
+    .normalize('NFD').replace(/[̀-ͯ]/g, '') // retire les accents
+    .toUpperCase()
+    .slice(0, SID_LINE_LENGTH)
+    .trimEnd();
+}
+
+function updateMetadata(line1, line2) {
+  const l1 = toSidText(line1);
+  const l2 = toSidText(line2);
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: l1,
+      artist: l2,
+      album: 'Navigation'
+    });
+  }
+  preview.textContent = l1 + '\n' + l2;
+}
+
+// ---- Spotify Web Playback SDK (PKCE, sans secret côté client) ----
+// La page devient elle-même le lecteur (device Spotify Connect) : la
+// musique joue en continu depuis cet onglet, donc plus besoin de voler le
+// focus audio pour afficher une alerte, juste de changer temporairement le
+// texte affiché puis de le restaurer.
+const SPOTIFY_SCOPES = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state';
+const SPOTIFY_REDIRECT_URI = window.location.origin + window.location.pathname;
+
+let spotifyAccessToken = null;
+let spotifyRefreshToken = null;
+let spotifyTokenExpiresAt = 0;
+let spotifyReady = false;
+let spotifyDeviceId = null;
+let currentTrackMeta = { title: 'Spotify', artist: '' };
+
+function base64url(bytes) {
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function generateCodeVerifier() {
+  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+  const values = crypto.getRandomValues(new Uint8Array(64));
+  return Array.from(values, v => possible[v % possible.length]).join('');
+}
+
+async function codeChallengeFromVerifier(verifier) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  return base64url(new Uint8Array(digest));
+}
+
+spotifyClientIdInput.value = localStorage.getItem('spotifyClientId') || '';
+
+spotifyConnectBtn.addEventListener('click', async () => {
+  const clientId = spotifyClientIdInput.value.trim();
+  if (!clientId) { spotifyStatusEl.textContent = 'Entre ton Client ID Spotify d\'abord'; return; }
+  localStorage.setItem('spotifyClientId', clientId);
+
+  const verifier = generateCodeVerifier();
+  sessionStorage.setItem('spotify_verifier', verifier);
+  const challenge = await codeChallengeFromVerifier(verifier);
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    response_type: 'code',
+    redirect_uri: SPOTIFY_REDIRECT_URI,
+    code_challenge_method: 'S256',
+    code_challenge: challenge,
+    scope: SPOTIFY_SCOPES
+  });
+  window.location.href = 'https://accounts.spotify.com/authorize?' + params.toString();
+});
+
+async function exchangeCodeForToken(code) {
+  const clientId = localStorage.getItem('spotifyClientId');
+  const verifier = sessionStorage.getItem('spotify_verifier');
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: SPOTIFY_REDIRECT_URI,
+      client_id: clientId,
+      code_verifier: verifier
+    })
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error_description || data.error);
+  applyTokenResponse(data);
+}
+
+async function refreshSpotifyToken() {
+  const clientId = localStorage.getItem('spotifyClientId');
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: spotifyRefreshToken,
+      client_id: clientId
+    })
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error_description || data.error);
+  applyTokenResponse(data);
+}
+
+function applyTokenResponse(data) {
+  spotifyAccessToken = data.access_token;
+  if (data.refresh_token) spotifyRefreshToken = data.refresh_token;
+  spotifyTokenExpiresAt = Date.now() + data.expires_in * 1000;
+  sessionStorage.setItem('spotify_refresh_token', spotifyRefreshToken || '');
+}
+
+async function ensureFreshToken() {
+  if (Date.now() > spotifyTokenExpiresAt - 60000) {
+    await refreshSpotifyToken();
+  }
+  return spotifyAccessToken;
+}
+
+// Gère le retour de redirection OAuth (?code=...), ou reprend une session
+// existante via le refresh token stocké, au chargement de la page.
+(async () => {
+  if (!settings.spotify) return;
+
+  const url = new URL(window.location.href);
+  const code = url.searchParams.get('code');
+  if (code) {
+    window.history.replaceState({}, '', SPOTIFY_REDIRECT_URI);
+    try {
+      spotifyStatusEl.textContent = 'Connexion en cours...';
+      await exchangeCodeForToken(code);
+      initSpotifyPlayer();
+    } catch (err) {
+      spotifyStatusEl.textContent = 'Erreur connexion: ' + err.message;
+    }
+    return;
+  }
+
+  const savedRefreshToken = sessionStorage.getItem('spotify_refresh_token');
+  if (savedRefreshToken) {
+    spotifyRefreshToken = savedRefreshToken;
+    try {
+      spotifyStatusEl.textContent = 'Reconnexion...';
+      await refreshSpotifyToken();
+      initSpotifyPlayer();
+    } catch (err) {
+      spotifyStatusEl.textContent = 'Session expirée, reconnecte-toi';
+      sessionStorage.removeItem('spotify_refresh_token');
+    }
+  }
+})();
+
+// Le script du SDK appelle window.onSpotifyWebPlaybackSDKReady dès qu'il a
+// fini de charger, qu'on soit connecté ou non : il faut la définir tout de
+// suite, et différer la création du player jusqu'à ce qu'on ait un token.
+let spotifySDKReady = false;
+let spotifyInitPending = false;
+
+window.onSpotifyWebPlaybackSDKReady = () => {
+  spotifySDKReady = true;
+  if (spotifyInitPending) createSpotifyPlayer();
+};
+
+function initSpotifyPlayer() {
+  if (spotifySDKReady) createSpotifyPlayer();
+  else spotifyInitPending = true;
+}
+
+function createSpotifyPlayer() {
+  const player = new Spotify.Player({
+    name: 'SID Nav Player',
+    getOAuthToken: async cb => cb(await ensureFreshToken()),
+    volume: 0.8
+  });
+
+  player.addListener('ready', async ({ device_id }) => {
+    spotifyDeviceId = device_id;
+    spotifyReady = true;
+    spotifyStatusEl.textContent = 'Connecté - transfert de la lecture...';
+    try {
+      await fetch('https://api.spotify.com/v1/me/player', {
+        method: 'PUT',
+        headers: {
+          'Authorization': 'Bearer ' + (await ensureFreshToken()),
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ device_ids: [device_id], play: true })
+      });
+      spotifyStatusEl.textContent = 'Connecté - musique routée vers la page';
+    } catch (err) {
+      spotifyStatusEl.textContent = 'Connecté mais transfert échoué: ' + err.message;
+    }
+  });
+
+  player.addListener('not_ready', () => {
+    spotifyReady = false;
+  });
+
+  player.addListener('player_state_changed', state => {
+    if (!state || !state.track_window || !state.track_window.current_track) return;
+    const track = state.track_window.current_track;
+    currentTrackMeta = {
+      title: track.name,
+      artist: track.artists.map(a => a.name).join(', ')
+    };
+    if (!alertOverrideActive) {
+      updateMetadata(currentTrackMeta.title, currentTrackMeta.artist);
+    }
+  });
+
+  player.connect();
+}
+
+// ---- Diffusion des alertes ----
+// Ligne 1/2 : alerte le temps de holdMs, puis restauration du morceau en
+// cours (Spotify connecté) ou vol de focus ponctuel en repli (silence.mp3).
+const ALERT_HOLD_MS = 3000;
+let releaseTimer = null;
+let alertOverrideActive = false;
+
+async function pushAlert(line1, line2, holdMs = ALERT_HOLD_MS) {
+  clearTimeout(releaseTimer);
+  alertOverrideActive = true;
+  updateMetadata(line1, line2);
+  // Nudge le BT changer pour qu'il aille rechercher le texte, sans couper le son
+  navigator.mediaSession.playbackState = 'paused';
+  setTimeout(() => { navigator.mediaSession.playbackState = 'playing'; }, 100);
+
+  if (settings.spotify && spotifyReady) {
+    releaseTimer = setTimeout(() => {
+      alertOverrideActive = false;
+      updateMetadata(currentTrackMeta.title, currentTrackMeta.artist);
+    }, holdMs);
+    return;
+  }
+
+  // Repli sans Spotify : vol de focus ponctuel (micro-coupure audible)
+  try {
+    await audio.play();
+  } catch (err) {
+    statusEl.textContent = 'Lecture bloquée: ' + err.message;
+  }
+  releaseTimer = setTimeout(() => {
+    alertOverrideActive = false;
+    audio.pause();
+  }, holdMs);
+}
+
+// ---- Traduction des manoeuvres OSRM en texte FR compact (<=12 car.) ----
+const MODIFIER_FR = {
+  'uturn': 'Demi-tour',
+  'sharp right': 'Fort droite',
+  'right': 'A droite',
+  'slight right': 'Leg droite',
+  'straight': 'Tout droit',
+  'slight left': 'Leg gauche',
+  'left': 'A gauche',
+  'sharp left': 'Fort gauche'
+};
+
+function instructionText(step) {
+  const type = step.maneuver.type;
+  const modifier = step.maneuver.modifier;
+  const modText = MODIFIER_FR[modifier] || 'Continuer';
+
+  switch (type) {
+    case 'depart': return 'Depart';
+    case 'arrive': return 'Arrivee';
+    case 'roundabout':
+    case 'rotary': {
+      const exit = step.maneuver.exit;
+      return exit ? 'Rond-pt ' + exit : 'Rond-point';
+    }
+    case 'exit roundabout':
+    case 'exit rotary': return 'Sortir RP';
+    case 'fork': return modText;
+    case 'merge': return 'Rejoindre';
+    case 'on ramp': return 'Bretelle';
+    case 'off ramp': return 'Sortie';
+    case 'end of road': return modText;
+    case 'continue':
+    case 'new name': return 'Tout droit';
+    case 'turn': return modText;
+    default: return modText;
+  }
+}
+
+function formatDistance(m) {
+  if (m >= 1000) return (m / 1000).toFixed(1).replace('.', ',') + ' km';
+  return Math.round(m / 10) * 10 + ' m';
+}
+
+// ---- Géocodage (Nominatim, gratuit, sans clé - usage léger uniquement) ----
+async function geocode(address) {
+  const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(address);
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!data.length) throw new Error('Adresse introuvable');
+  return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+}
+
+// ---- Routage (OSRM démo publique, gratuit, sans clé - usage léger uniquement) ----
+async function route(fromLat, fromLon, toLat, toLon) {
+  const url = `https://router.project-osrm.org/route/v1/driving/${fromLon},${fromLat};${toLon},${toLat}?steps=true&overview=false`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (data.code !== 'Ok') throw new Error('Itinéraire introuvable');
+  return data.routes[0].legs[0].steps;
+}
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Cap initial (bearing) en degrés de (lat1,lon1) vers (lat2,lon2)
+function bearing(lat1, lon1, lat2, lon2) {
+  const toRad = d => d * Math.PI / 180;
+  const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
+  const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+            Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function angleDiff(a, b) {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+// ---- Bip d'alerte (Web Audio, pas de fichier externe) ----
+let audioCtx = null;
+function playAlertBeep() {
+  if (!settings.beep) return;
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  [0, 250].forEach(delay => {
+    setTimeout(() => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = 880;
+      gain.gain.value = 0.15;
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.15);
+    }, delay);
+  });
+}
+
+// ---- Radars fixes (OpenStreetMap Overpass, gratuit, données communautaires) ----
+let cameraCache = [];
+let cameraCacheCenter = null;
+const CAMERA_REFRESH_DIST = 1500; // m avant de re-interroger Overpass
+const CAMERA_SEARCH_RADIUS = 3000; // m autour de la position
+
+async function refreshCameras(lat, lon) {
+  const query = `[out:json][timeout:20];node["highway"="speed_camera"](around:${CAMERA_SEARCH_RADIUS},${lat},${lon});out;`;
+  const res = await fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    body: 'data=' + encodeURIComponent(query)
+  });
+  const data = await res.json();
+  cameraCache = data.elements.map(el => ({ lat: el.lat, lon: el.lon }));
+  cameraCacheCenter = { lat, lon };
+}
+
+async function ensureCameras(lat, lon) {
+  if (!cameraCacheCenter || haversine(lat, lon, cameraCacheCenter.lat, cameraCacheCenter.lon) > CAMERA_REFRESH_DIST) {
+    try {
+      await refreshCameras(lat, lon);
+    } catch (err) {
+      console.warn('Overpass indisponible', err);
+    }
+  }
+}
+
+function renderStepsList() {
+  stepsLabelEl.textContent = routeSteps.length ? routeSteps.length + ' étapes' : '';
+  stepsEl.innerHTML = routeSteps.map((s, i) => {
+    const marker = i === currentIndex ? '➤ ' : '';
+    return marker + instructionText(s) + ' - ' + (s.name || '(sans nom)');
+  }).join('<br>');
+}
+
+let routeSteps = [];   // steps OSRM restants
+let currentIndex = 0;
+let lastThreshold = null;
+let watchId = null;
+
+calcBtn.addEventListener('click', async () => {
+  if (!settings.nav) return;
+  const dest = destInput.value.trim();
+  if (!dest) return;
+  statusEl.textContent = 'Géolocalisation...';
+  calcBtn.disabled = true;
+
+  navigator.geolocation.getCurrentPosition(async pos => {
+    try {
+      statusEl.textContent = 'Recherche de l\'adresse...';
+      const destPos = await geocode(dest);
+
+      statusEl.textContent = 'Calcul de l\'itinéraire...';
+      const steps = await route(
+        pos.coords.latitude, pos.coords.longitude,
+        destPos.lat, destPos.lon
+      );
+
+      routeSteps = steps;
+      currentIndex = 0;
+      lastThreshold = null;
+      renderStepsList();
+
+      statusEl.textContent = 'Itinéraire prêt (' + steps.length + ' étapes). Tu peux démarrer.';
+    } catch (err) {
+      statusEl.textContent = 'Erreur: ' + err.message;
+    } finally {
+      calcBtn.disabled = false;
+    }
+  }, err => {
+    statusEl.textContent = 'Erreur GPS: ' + err.message;
+    calcBtn.disabled = false;
+  }, { enableHighAccuracy: true });
+});
+
+startBtn.addEventListener('click', () => {
+  // Ce premier play()/pause() sert uniquement à "débloquer" la lecture audio
+  // (requis par iOS suite à un geste utilisateur) pour que les futurs
+  // audio.play() déclenchés depuis la géolocalisation fonctionnent sans
+  // nouveau geste. On ne garde pas l'audio actif en continu : Spotify/Apple
+  // Music restent la source principale entre deux alertes.
+  audio.play().then(() => {
+    audio.pause();
+    statusEl.textContent = 'Actif - en écoute';
+    startBtn.disabled = true;
+    startNavLoop();
+  }).catch(err => {
+    statusEl.textContent = 'Erreur lecture audio: ' + err;
+  });
+});
+
+const THRESHOLDS = [500, 200, 100, 30];
+const ALERT_THRESHOLDS = [100, 200, 500]; // ordre croissant : find() doit retourner la bande la plus serrée déjà atteinte
+const ALERT_AHEAD_ANGLE = 45; // degrés de tolérance autour du cap pour dire "devant"
+const ALERT_SEARCH_RADIUS = 800; // m
+
+let lastPos = null;
+let lastAlertKey = null;   // "camIndex:threshold" pour éviter de rejouer le même bip
+
+function startNavLoop() {
+  if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+
+  if (settings.nav && routeSteps.length > 0) {
+    watchId = navigator.geolocation.watchPosition(navTick, err => {
+      statusEl.textContent = 'Erreur GPS: ' + err.message;
+    }, { enableHighAccuracy: true, maximumAge: 1000 });
+  } else {
+    watchId = navigator.geolocation.watchPosition(alertTick, err => {
+      statusEl.textContent = 'Erreur GPS: ' + err.message;
+    }, { enableHighAccuracy: true, maximumAge: 1000 });
+  }
+}
+
+function navTick(pos) {
+  if (currentIndex >= routeSteps.length) {
+    pushAlert('Arrivee', 'Destination');
+    return;
+  }
+
+  const { latitude, longitude } = pos.coords;
+  const target = routeSteps[currentIndex].maneuver.location; // [lon, lat]
+  const dist = haversine(latitude, longitude, target[1], target[0]);
+
+  // Avancer à l'étape suivante une fois la manoeuvre atteinte
+  if (dist < 25 && currentIndex < routeSteps.length - 1) {
+    currentIndex++;
+    lastThreshold = null;
+    renderStepsList();
+  }
+
+  const nextStep = routeSteps[currentIndex];
+  const label = instructionText(nextStep);
+
+  // Ne rafraîchit que sur franchissement de seuil (évite de spammer l'I-bus)
+  // Ligne 1 = distance, ligne 2 = instruction : le SID n'a que 12 car./ligne,
+  // pas la place de combiner distance + manoeuvre + nom de rue sur une ligne.
+  const crossedThreshold = THRESHOLDS.find(t => dist <= t && lastThreshold !== t);
+  if (crossedThreshold || lastThreshold === null) {
+    lastThreshold = crossedThreshold || THRESHOLDS[0];
+    pushAlert(formatDistance(dist), label);
+  }
+}
+
+// Mode sans destination : alerte uniquement sur les radars fixes situés devant le véhicule
+async function alertTick(pos) {
+  if (!settings.radar) return;
+
+  const { latitude, longitude, heading, speed } = pos.coords;
+
+  await ensureCameras(latitude, longitude);
+
+  // Cap de déplacement : heading GPS si dispo, sinon calculé depuis la position précédente
+  let travelBearing = (heading !== null && !isNaN(heading)) ? heading : null;
+  if (travelBearing === null && lastPos) {
+    travelBearing = bearing(lastPos.lat, lastPos.lon, latitude, longitude);
+  }
+  lastPos = { lat: latitude, lon: longitude };
+
+  if (travelBearing === null || (speed !== null && speed < 1)) {
+    // Pas assez de mouvement pour déterminer une direction fiable
+    return;
+  }
+
+  // Parmi les radars à portée, ne garder que ceux à peu près devant, prendre le plus proche
+  let closest = null;
+  let closestDist = Infinity;
+  cameraCache.forEach((cam, i) => {
+    const dist = haversine(latitude, longitude, cam.lat, cam.lon);
+    if (dist > ALERT_SEARCH_RADIUS) return;
+    const camBearing = bearing(latitude, longitude, cam.lat, cam.lon);
+    if (angleDiff(travelBearing, camBearing) > ALERT_AHEAD_ANGLE) return;
+    if (dist < closestDist) {
+      closestDist = dist;
+      closest = i;
+    }
+  });
+
+  if (closest === null) {
+    // Pas de radar détecté : on ne touche pas au focus audio, Spotify/Apple
+    // Music restent affichés normalement sur le SID.
+    lastAlertKey = null;
+    return;
+  }
+
+  const crossedThreshold = ALERT_THRESHOLDS.find(t => closestDist <= t);
+  if (!crossedThreshold) return;
+
+  const key = closest + ':' + crossedThreshold;
+  if (key === lastAlertKey) return;
+  lastAlertKey = key;
+
+  pushAlert('ZONE CONTROLE', formatDistance(closestDist));
+  playAlertBeep();
+}
+</script>
+
+</body>
+</html>
