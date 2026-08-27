@@ -244,19 +244,23 @@ let releaseTimer = null;
 async function pushAlert(line1, line2, holdMs = ALERT_HOLD_MS) {
   updateMetadata(line1, line2);
   clearTimeout(releaseTimer);
+
+  // Vraie transition PAUSE -> PLAY de l'élément audio (pas juste la
+  // propriété informative mediaSession.playbackState, qui ne déclenche
+  // aucune vraie commande Bluetooth AVRCP si l'audio réel ne change pas
+  // d'état). Le BT changer ne semble redemander le texte que sur une vraie
+  // transition de transport, donc si l'audio joue déjà (fréquent en mode
+  // navigation actif), on le coupe puis le relance pour de vrai.
+  if (!audio.paused) {
+    audio.pause();
+    await new Promise(r => setTimeout(r, 150));
+  }
   try {
     await audio.play();
   } catch (err) {
     statusEl.textContent = 'Lecture bloquée: ' + err.message;
   }
-  // Nudge le BT changer : si l'audio est déjà en lecture (fréquent en mode
-  // navigation actif), un simple changement de métadonnées ne suffit pas
-  // toujours à le faire relire le texte - certains ne le font que sur une
-  // vraie transition d'état playback. D'où ce court aller-retour.
-  navigator.mediaSession.playbackState = 'paused';
-  setTimeout(() => {
-    navigator.mediaSession.playbackState = 'playing';
-  }, 100);
+
   releaseTimer = setTimeout(() => {
     audio.pause();
     // Sans ça, le SID reste bloqué sur le texte de l'alerte indéfiniment :
