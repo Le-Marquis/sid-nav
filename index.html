@@ -148,6 +148,12 @@
   </div>
 </div>
 
+<div class="card">
+  <h2>Test</h2>
+  <button id="testRadarBtn">Tester alerte radar</button>
+  <div class="hint">Simule une détection radar (texte + bip) sans GPS ni vrai radar, pour vérifier l'affichage sur le SID.</div>
+</div>
+
 <div class="card" id="spotifyCard">
   <h2>Spotify</h2>
   <input type="text" id="spotifyClientId" placeholder="Spotify Client ID">
@@ -188,6 +194,7 @@ const spotifyClientIdInput = document.getElementById('spotifyClientId');
 const spotifyConnectBtn = document.getElementById('spotifyConnectBtn');
 const spotifyPlayBtn = document.getElementById('spotifyPlayBtn');
 const spotifyStatusEl = document.getElementById('spotifyStatus');
+const testRadarBtn = document.getElementById('testRadarBtn');
 
 // ---- Réglages persistants (activer/désactiver les fonctions) ----
 const DEFAULT_SETTINGS = { nav: true, radar: true, beep: true, spotify: true };
@@ -280,6 +287,10 @@ spotifyClientIdInput.value = localStorage.getItem('spotifyClientId') || '';
 
 spotifyPlayBtn.addEventListener('click', async () => {
   try {
+    // Déblocage audio iOS directement ici : ce clic suffit à lui seul,
+    // pas besoin de passer par le bouton "Démarrer" (réservé à l'itinéraire).
+    await audio.play();
+    audio.pause();
     await spotifyPlayer.resume();
     spotifyStatusEl.textContent = 'Connecté - musique en cours';
     spotifyPlayBtn.style.display = 'none';
@@ -660,6 +671,12 @@ let routeSteps = [];   // steps OSRM restants
 let currentIndex = 0;
 let lastThreshold = null;
 let watchId = null;
+
+testRadarBtn.addEventListener('click', () => {
+  const combined = 'RADAR ' + formatDistanceCompact(100);
+  pushAlert(combined, combined);
+  playAlertBeep();
+});
 
 calcBtn.addEventListener('click', async () => {
   if (!settings.nav) return;
