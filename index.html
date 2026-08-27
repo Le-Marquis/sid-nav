@@ -252,6 +252,11 @@ async function pushAlert(line1, line2, holdMs = ALERT_HOLD_MS) {
   }
   releaseTimer = setTimeout(() => {
     audio.pause();
+    // Sans ça, le SID reste bloqué sur le texte de l'alerte indéfiniment :
+    // couper l'audio ne fait pas revenir automatiquement l'affichage à autre
+    // chose (Spotify/Apple Music ne reprennent pas forcément la main tout de
+    // suite, surtout hors conduite réelle où rien d'autre ne joue).
+    updateMetadata('EN ATTENTE', 'EN ATTENTE');
   }, holdMs);
 }
 
