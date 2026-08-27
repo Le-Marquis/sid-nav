@@ -551,6 +551,15 @@ function formatDistance(m) {
   return Math.round(m / 10) * 10 + ' m';
 }
 
+// Version compacte (sans espace) pour tenir distance + instruction sur une
+// seule ligne de 12 caractères - le SID de l'utilisateur n'affiche fiablement
+// qu'un seul des deux champs title/artist, donc on duplique le même texte
+// combiné sur les deux plutôt que de les répartir sur deux lignes.
+function formatDistanceCompact(m) {
+  if (m >= 1000) return (m / 1000).toFixed(1) + 'KM';
+  return Math.round(m / 10) * 10 + 'M';
+}
+
 // ---- Géocodage (Nominatim, gratuit, sans clé - usage léger uniquement) ----
 async function geocode(address) {
   const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(address);
@@ -719,6 +728,9 @@ function startNavLoop() {
       statusEl.textContent = 'Erreur GPS: ' + err.message;
     }, { enableHighAccuracy: true, maximumAge: 1000 });
   } else {
+    alertOverrideActive = true;
+    lastAlertKey = 'idle';
+    updateMetadata('RADARS ON', 'RADARS ON');
     watchId = navigator.geolocation.watchPosition(alertTick, err => {
       statusEl.textContent = 'Erreur GPS: ' + err.message;
     }, { enableHighAccuracy: true, maximumAge: 1000 });
@@ -727,7 +739,7 @@ function startNavLoop() {
 
 function navTick(pos) {
   if (currentIndex >= routeSteps.length) {
-    pushAlert('Arrivee', 'Destination');
+    pushAlert('Arrivee', 'Arrivee');
     return;
   }
 
@@ -746,12 +758,14 @@ function navTick(pos) {
   const label = instructionText(nextStep);
 
   // Ne rafraîchit que sur franchissement de seuil (évite de spammer l'I-bus)
-  // Ligne 1 = distance, ligne 2 = instruction : le SID n'a que 12 car./ligne,
-  // pas la place de combiner distance + manoeuvre + nom de rue sur une ligne.
+  // Distance + instruction combinées sur une seule ligne (dupliquée sur les
+  // deux champs title/artist) : le SID de l'utilisateur ne surface qu'un des
+  // deux champs de façon fiable.
   const crossedThreshold = THRESHOLDS.find(t => dist <= t && lastThreshold !== t);
   if (crossedThreshold || lastThreshold === null) {
     lastThreshold = crossedThreshold || THRESHOLDS[0];
-    pushAlert(formatDistance(dist), label);
+    const combined = formatDistanceCompact(dist) + ' ' + label;
+    pushAlert(combined, combined);
   }
 }
 
@@ -790,9 +804,15 @@ async function alertTick(pos) {
   });
 
   if (closest === null) {
-    // Pas de radar détecté : on ne touche pas au focus audio, Spotify/Apple
-    // Music restent affichés normalement sur le SID.
-    lastAlertKey = null;
+    // Pas de radar détecté : affiche un statut fixe plutôt que de laisser
+    // passer les métadonnées brutes de Spotify (ex: état "Spotify - Web
+    // Player" avant qu'un vrai morceau soit chargé), qui n'apportent rien
+    // d'utile en mode radar seul.
+    if (lastAlertKey !== 'idle') {
+      lastAlertKey = 'idle';
+      alertOverrideActive = true;
+      updateMetadata('RADARS ON', 'RADARS ON');
+    }
     return;
   }
 
@@ -803,7 +823,8 @@ async function alertTick(pos) {
   if (key === lastAlertKey) return;
   lastAlertKey = key;
 
-  pushAlert('ZONE CONTROLE', formatDistance(closestDist));
+  const combined = 'RADAR ' + formatDistanceCompact(closestDist);
+  pushAlert(combined, combined);
   playAlertBeep();
 }
 </script>
